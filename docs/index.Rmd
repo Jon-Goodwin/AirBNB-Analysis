@@ -15,11 +15,13 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 library(here)
 library(tidyverse)
 library(gt)
+library(e1071)
 library(scales)
 library(corrplot)
 library(caret)
 library(randomForest)
 library(glmnet)
+library(gbm)
 ```
 
 
@@ -204,12 +206,18 @@ test_data <- anti_join(df, train_data, by = 'id')
 mod.lm <- lm(price ~ .-id, data = train_data)
 
 # Test model on test set
-predictions <- predict(mod.lm, test_data)
+predictions <- predict(mod.lm, test_data, type = "response")
 
+# Calculating RMSE and MAE
+mae <- mean(abs(test_data$price - predictions))
+cat("Mean Absolute Error (MAE):", mae, "\n")
+
+rmse <- sqrt(mean((test_data$price - predictions)^2))
+cat("Root Mean Squared Error (RMSE):", rmse, "\n")
 ```
 
-
-
+Now we may want to test some other model techniques namely ones that contain some sort of feature selection. To do that we will use random forest and lasso regression. Ideally these models will produce lower error rates then our standard
+linear model as they should capture some of the non linear relationships we observed in the data exploration phase.
 
 ```{r}
 set.seed(1)
@@ -253,6 +261,107 @@ final_model <- randomForest(price ~ ., data = train_data[, c("price", rfe_result
 predictions <- predict(final_model, newdata = test_data[, rfe_result$optVariables])
 performance <- postResample(predictions, test_data$price)
 print(performance)
+
+```
+
+As expected random forest performs better then the standard linear regression.
+Now we build a lasso regression model.
+
+```{r}
+set.seed(1)
+
+# Creating model matrix of predictors for Lasso fucntion
+X <- model.matrix(price ~ . -1, data = train_data)
+X.test <- model.matrix(price ~ . -1, data = test_data)
+Y <- train_data$price
+Y.test <- test_data$price
+
+# Fit LASSO model
+lasso.cv <- cv.glmnet(X, Y, alpha = 1, nfolds = 5)
+# Finding optimal lambda
+optimal <- lasso.cv$lambda.min
+# Fit the optimal lambda model
+lasso.mod <- glmnet(X, Y, alpha = 1, lambda = optimal)
+
+# Make predictions on new test data
+lasso.pred <- predict(lasso.mod, optimal, newx = X.test)
+
+# Compute error
+mae <- mean(abs(lasso.pred-Y.test))
+cat("Mean Absolute Error (MAE):", mae, "\n")
+
+rmse <- sqrt(mean((lasso.pred-Y.test)^2))
+cat("Root Mean Squared Error (RMSE):", rmse, "\n")
+```
+
+In  this case we find the lasso not to be a significant improvement over the 
+linear regression model. This is most likely caused by lasso not capturing non 
+linear relationships which are captured in random forest.
+
+The next method we will assess is gradient boosting machines
+
+```{r}
+set.seed(1)
+
+gbm_model <- gbm(price ~ .-last_review,data = train_data,  distribution = "gaussian",
+                 n.trees = 1000,
+                 interaction.depth = 3,
+                 shrinkage = 0.01,
+                 n.minobsinnode = 10,
+                 cv.folds = 5,
+                 verbose = FALSE)
+
+# Determine the optimal tree number
+optimal_trees <- gbm.perf(gbm_model, method = "cv")
+
+# Compute error rates
+predictions <- predict(gbm_model, newdata = test_data, n.trees = optimal_trees)
+performance <- postResample(predictions, test_data$price)
+print(performance)
+```
+
+Gradient boosting produces slightly better error rates then the random forest
+method. Next we will build a support vector machine model, to do this we will
+normalize the features so they are all using the same scale.
+
+```{r}
+set.seed(1)
+
+# Normalizing train and test split
+preprocess_params <- preProcess(train_data[, -which(names(train_data) == "price")], method = c("center", "scale"))
+
+train_data_scaled <- predict(preprocess_params, train_data)
+test_data_scaled <- predict(preprocess_params, test_data)
+test_data_scaled$price <- test_data$price
+
+# Training model with svm()
+svm_model <- svm(price ~ .,
+                 data = train_data_scaled,
+                 kernel = "radial",
+                 cost = 1,
+                 gamma = 0.1,
+                 epsilon = 0.1)
+
+# Computing error rates
+predictions <- predict(svm_model, newdata = test_data_scaled)
+performance <- postResample(predictions, test_data_scaled$price)
+print(performance)
+```
+
+The SVM performs the best of our models, with RMSE of 108 vs the next best performing model, the random forest of 115. 
+
+```{r}
+library(ggplot2)
+
+pred_vs_true <- data.frame(Predicted = predictions, True = test_data_scaled$price)
+ggplot(pred_vs_true, aes(x = True, y = Predicted)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "SVM Model: Predicted vs. True Prices",
+       x = "True Prices",
+       y = "Predicted Prices") +
+  theme_minimal()
+
 
 ```
 
