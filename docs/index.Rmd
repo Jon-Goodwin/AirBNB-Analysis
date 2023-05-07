@@ -176,7 +176,7 @@ corrplot(cor(as.matrix(df),method = "spearman"),
                  addCoef.col = "black")
 ```
 
-# Feature Selection
+# Model Selection
 
 
 
@@ -361,7 +361,7 @@ ggplot(pred_vs_true, aes(x = True, y = Predicted)) +
        x = "True Prices",
        y = "Predicted Prices") +
   theme_minimal()
-
-
 ```
 
+SVM shows a 20% improvement in Mean absolute error over our baseline linear
+regression, and a 7% improvement in Root mean square error.
