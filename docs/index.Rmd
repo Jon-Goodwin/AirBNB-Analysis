@@ -182,8 +182,7 @@ corrplot(cor(as.matrix(df),method = "spearman"),
 ```{r}
 df <- data %>%
   filter(price < 1500 & bedrooms < 9) %>%
-  select(id, host_id, longitude, latitude, price, room_type,
-         host_name, name, minimum_nights, number_of_reviews, last_review, reviews_per_month, availability_365, bedrooms, calculated_host_listings_count,
+  select(id, longitude, latitude, price, room_type, minimum_nights, number_of_reviews, last_review, reviews_per_month, availability_365, bedrooms, calculated_host_listings_count,
          number_of_reviews_ltm) %>% drop_na()
 ```
 
@@ -201,8 +200,11 @@ train_data <- df %>%
 
 test_data <- anti_join(df, train_data, by = 'id')
 
-mod.lm <- lm(price ~ ., data = train_data)
+# Train model
+mod.lm <- lm(price ~ .-id, data = train_data)
 
+# Test model on test set
+predictions <- predict(mod.lm, test_data)
 
 ```
 
