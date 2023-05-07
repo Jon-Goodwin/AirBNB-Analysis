@@ -1,0 +1,256 @@
+---
+title: "Toronto AirBNB Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+```
+
+```{r}
+# Load packages
+library(here)
+library(tidyverse)
+library(gt)
+library(scales)
+library(corrplot)
+library(caret)
+library(randomForest)
+library(glmnet)
+```
+
+
+```{r}
+# Read in data
+data  <- read_csv(here("inputs//data_prep.csv"))
+data <- data %>%
+  mutate(room_type = as.factor(room_type), license = as.factor(license))
+```
+# Introduction
+
+For this analysis we're explore the listings data of Airbnb rentals in Toronto. The data can be found at [link](http://insideairbnb.com/get-the-data/)
+
+We're primarily interested in the rental price however we'll explore the entire dataset for anything interesting and visualize the results. The analysis will conclude with a model for predicting rental prices.
+
+We've previously removed all listings with no reviews, we also remove all listings with no availability within the next year as these are likely no longer actively being rented and removed NA columns from the data.
+
+# Data Exploration
+
+We'll generate some initial summary statistics of the various predictors
+to get started:
+
+
+```{r}
+# Check Summary Statistics
+summary(data)
+```
+Some initial things to note from the summary statistics is that the vast majority of listings(67.7%) are entire homes or apartments as opposed to shared living spaces. Private rooms make up the bulk of the remainder at 31.5%.
+
+```{r, fig.width = 5, fig.height = 4}
+
+data %>%
+  select(room_type) %>%
+  group_by(room_type) %>%
+  summarize(listings = n()) %>%
+  ungroup() %>%
+  mutate(room_type = fct_reorder(room_type, listings)) %>%
+  ggplot(aes(x = room_type, y = listings, fill = room_type)) +
+  geom_bar(stat = "identity") + 
+  theme(legend.position = "none") +
+  xlab("Room Type") +
+  ylab("Listings")
+```
+
+Like any other residential property the neighbourhood is a likely predictor of the price of the property being rented so next be look at the distribution of 
+
+Lets now look at the distribution of rental prices:
+
+```{r, fig.width = 5, fig.height = 4}
+ggplot(data, aes(x = price)) +
+  geom_histogram(binwidth = 10, fill = "blue", color = "black") +
+  labs(title = "Distribution of Airbnb Rental Prices",
+       x = "Price",
+       y = "Count")
+```
+
+I've identified the major outlier in this case to be [this](https://www.airbnb.ca/rooms/43356632?adults=1&enable_m3_private_room=true&check_in=2023-05-10&check_out=2023-05-12&federated_search_id=1e55edf8-ab38-416f-a94b-39b161fc71c1&source_impression_id=p3_1683402984_4BxxLqBL6P8g6lGs&guests=1) listing. To get a better idea we can check for example how many listings are there above a price of $5000?
+
+```{r}
+dim(data %>%
+  filter(price > 5000))[1]
+```
+
+We find there are only 13 listings. We can then look at a boxplot of the remaining listings after removing the ones above 5000.
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 5000) %>%
+  ggplot(aes(x = price)) +
+  geom_boxplot(color = "blue", outlier.color = "red", outlier.size = 2) +
+  scale_x_continuous(breaks = c(0,1000,2000, 3000, 4000, 5000)) +
+  ylim(-4,4) + 
+  stat_boxplot(geom ='errorbar') +
+  theme(axis.title.y = element_blank(),
+              axis.text.y = element_blank(),
+              axis.ticks.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank())
+```
+
+The data seems to get much more spread out above a price of $1500, so we'll focus in on those data points:
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500) %>%
+  ggplot(aes(x = price)) +
+  geom_boxplot(color = "blue", outlier.color = "red", outlier.size = 2) +
+  scale_x_continuous(breaks = seq(from = 0, to = 1500, by = 250)) +
+  ylim(-4,4) + 
+  stat_boxplot(geom ='errorbar') +
+  theme(axis.title.y = element_blank(),
+              axis.text.y = element_blank(),
+              axis.ticks.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank())
+```
+
+This seems like a better representation of most of the price data for the listings.
+
+As with any property value we may expect things like the number of bedrooms in the listing to be a predictor of price. Larger properties should have higher bedroom counts and thus be more expensive to rent:
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500) %>%
+  mutate(bedrooms = as.factor(bedrooms)) %>%
+  select(price, bedrooms) %>%
+  group_by(bedrooms) %>%
+  summarize(mean_price = mean(price)) %>%
+  ungroup() %>%
+  ggplot(aes(x = bedrooms, y = mean_price, fill = bedrooms)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(breaks = seq(from = 0, to = 1500, by = 250)) +
+  theme(legend.position = "none") +
+  xlab("# of Bedrooms") +
+  ylab("Mean Price")
+```
+
+There appears to be only 1 listing with 9 bedrooms.
+```{r}
+data %>%
+  filter(price < 1500 & bedrooms == 9)
+```
+
+Because the price is so wildly off from the overall trend I think it's best to remove this point in the model.
+
+Next it seems likely review scores should be a strong predictor of prices:
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5) %>%
+  ggplot(aes(x = review_scores_rating, y = price)) +
+    geom_point(alpha = 0.5, color = "#43a2ca") +
+    geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Price vs. Review Scores Rating",
+       x = "Review Scores",
+       y = "Price")
+
+```
+
+We should also check for linear correlations between predictors, we can visualize
+this via a correlation matrix
+
+```{r, fig.width = 5, fig.height = 4}
+df <- data %>%
+  filter(price < 1500 & bedrooms < 9) %>%
+  select(price, minimum_nights, number_of_reviews, review_scores_rating, calculated_host_listings_count)
+
+corrplot(cor(as.matrix(df),method = "spearman"),
+                 method = "color",
+                  tl.cex = 0.9,
+                 number.cex = 0.95,
+                 addCoef.col = "black")
+```
+
+# Feature Selection
+
+
+
+
+```{r}
+df <- data %>%
+  filter(price < 1500 & bedrooms < 9) %>%
+  select(id, host_id, longitude, latitude, price, room_type,
+         host_name, name, minimum_nights, number_of_reviews, last_review, reviews_per_month, availability_365, bedrooms, calculated_host_listings_count,
+         number_of_reviews_ltm) %>% drop_na()
+```
+
+We would like to find a model that outperforms linear regression
+performed using all predictors. This is the simplest model we could employ,
+though we found no evidence that the predictors have linear relationships
+with price it will serve as a good baseline to assess the performance of other
+models which are more computationally expensive to train.
+
+```{r}
+set.seed(1)
+
+train_data <- df %>%
+  sample_frac(0.70)
+
+test_data <- anti_join(df, train_data, by = 'id')
+
+mod.lm <- lm(price ~ ., data = train_data)
+
+
+```
+
+
+
+
+```{r}
+set.seed(1)
+
+# Split data train/test
+
+train_data <- df %>%
+  sample_frac(0.70)
+
+test_data <- anti_join(df, train_data, by = 'id')
+
+# Defining Control Parameters
+control_rfe <- rfeControl(functions = rfFuncs,
+                          method = "cv",
+                          number = 5,
+                          verbose = FALSE)
+
+# Defining Predictors
+predictors <- names(train_data[, !(names(train_data) %in% c("price"))])
+
+# Run RFE
+rfe_result <- rfe(train_data[, predictors],
+                  train_data$price,
+                  sizes = c(1:10),
+                  rfeControl = control_rfe)
+print(rfe_result)
+```
+
+The top 5 of 10 predictors are bedrooms, minimum_nights, room_type, latitude
+and longitude
+
+```{r}
+set.seed(1)
+
+best_features <- predictors[rfe_result$optVariables]
+
+# Train the final model with the selected features
+final_model <- randomForest(price ~ ., data = train_data[, c("price", rfe_result$optVariables)])
+
+# Evaluate the model performance on the test dataset
+predictions <- predict(final_model, newdata = test_data[, rfe_result$optVariables])
+performance <- postResample(predictions, test_data$price)
+print(performance)
+
+```
+
