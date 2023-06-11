@@ -161,12 +161,84 @@ data %>%
 
 ```
 
+We can similarly do some quick visualizations to see the relationships among other predictors and the price variable:
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5) %>%
+  ggplot(aes(x = minimum_nights)) + geom_histogram(binwidth = 10, fill = "blue", color = "black") +
+  labs(title = "Distribution of Minimun Nights",
+       x = "Nights",
+       y = "Count")
+```
+
+Clearly we have a pretty wide tail to the right on this distribution, suggesting
+that there are again a few extreme outliers in this data.
+
+```{r}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5) %>%
+  select(minimum_nights) %>%
+  group_by(minimum_nights) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n))
+```
+
+```{r}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5 & minimum_nights > 1000)
+```
+
+Interestingly by far the most common minimum nights selection on AirBNB is full
+month stays. Followed by 1,2,3 nights. The outliers we're seeing in minimum nights largely seem to be inactive listings, with last reviews [here](https://www.airbnb.com/rooms/6603272) for example being from 2016. We would like to remove listings like this but instead of making a cut off for minimum nights we will seek to do this by last review date. This ensures that the pricing we're seeing in the data is currently active listings.
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5) %>%
+  ggplot(aes(x = last_review)) + geom_histogram(binwidth = 10, fill = "blue", color = "black") +
+  labs(title = "Distribution of Latest Review Date",
+       x = "Last Review Date",
+       y = "Count")
+```
+
+As we can see the vast majority of these listings are recent, however we are getting a stretch of listings dating back all the way to 2015. For the sake of ensuring the pricing is accurate especially considering the price disturbances caused during Covid, we'll remove listings who have not received a review after 2020.
+
+```{r}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5 & last_review >= '2020-01-01')
+```
+
+Next we'll check the relationship of the number of reviews for a listing and it's price
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5 & last_review >= '2020-01-01') %>%
+  ggplot(aes(x = number_of_reviews, y = price)) + geom_point( color = "blue") +
+  labs(title = "Number of Reviews vs Price",
+       x = "Number of Reviews",
+       y = "Price")
+```
+
+There doesn't appear to be any correlation here but we may the listings with very high review counts make this data difficult to see, we can visualize this again with a limit on the number of reviews:
+
+```{r, fig.width = 5, fig.height = 4}
+data %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5 & last_review >= '2020-01-01' & number_of_reviews < 180) %>%
+  ggplot(aes(x = number_of_reviews, y = price)) + geom_point( color = "blue") +
+  labs(title = "Number of Reviews vs Price",
+       x = "Number of Reviews",
+       y = "Price")
+```
+
+No obvious correlation seems to be present in the relationship between the number
+of reviews and the price of the listing.
+
 We should also check for linear correlations between predictors, we can visualize
 this via a correlation matrix
 
 ```{r, fig.width = 5, fig.height = 4}
 df <- data %>%
-  filter(price < 1500 & bedrooms < 9) %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5 & last_review >= '2020-01-01') %>%
   select(price, minimum_nights, number_of_reviews, review_scores_rating, calculated_host_listings_count)
 
 corrplot(cor(as.matrix(df),method = "spearman"),
@@ -176,20 +248,21 @@ corrplot(cor(as.matrix(df),method = "spearman"),
                  addCoef.col = "black")
 ```
 
+None of these values seem to be particularly large so it seems we can safely assume that there is no multicolinearity present in these predictors.
+
+
 # Model Selection
-
-
 
 
 ```{r}
 df <- data %>%
-  filter(price < 1500 & bedrooms < 9) %>%
+  filter(price < 1500 & bedrooms < 9 & number_of_reviews > 5 & last_review >= '2020-01-01') %>%
   select(id, longitude, latitude, price, room_type, minimum_nights, number_of_reviews, last_review, reviews_per_month, availability_365, bedrooms, calculated_host_listings_count,
          number_of_reviews_ltm) %>% drop_na()
 ```
 
 We would like to find a model that outperforms linear regression
-performed using all predictors. This is the simplest model we could employ,
+trained using all predictors. This is the simplest model we could employ,
 though we found no evidence that the predictors have linear relationships
 with price it will serve as a good baseline to assess the performance of other
 models which are more computationally expensive to train.
