@@ -331,10 +331,23 @@ best_features <- predictors[rfe_result$optVariables]
 final_model <- randomForest(price ~ ., data = train_data[, c("price", rfe_result$optVariables)])
 
 # Evaluate the model performance on the test dataset
-predictions <- predict(final_model, newdata = test_data[, rfe_result$optVariables])
-performance <- postResample(predictions, test_data$price)
+predictions_1 <- predict(final_model, newdata = test_data[, rfe_result$optVariables])
+performance <- postResample(predictions_1, test_data$price)
 print(performance)
 
+```
+
+```{r}
+library(ggplot2)
+
+pred_vs_true <- data.frame(Predicted = predictions_1, True = test_data$price)
+ggplot(pred_vs_true, aes(x = True, y = Predicted)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Random Forest Model: Predicted vs. True Prices",
+       x = "True Prices",
+       y = "Predicted Prices") +
+  theme_minimal()
 ```
 
 As expected random forest performs better then the standard linear regression.
@@ -388,12 +401,25 @@ gbm_model <- gbm(price ~ .-last_review,data = train_data,  distribution = "gauss
 optimal_trees <- gbm.perf(gbm_model, method = "cv")
 
 # Compute error rates
-predictions <- predict(gbm_model, newdata = test_data, n.trees = optimal_trees)
-performance <- postResample(predictions, test_data$price)
+predictions_2 <- predict(gbm_model, newdata = test_data, n.trees = optimal_trees)
+performance <- postResample(predictions_2, test_data$price)
 print(performance)
 ```
 
-Gradient boosting produces slightly better error rates then the random forest
+```{r}
+library(ggplot2)
+
+pred_vs_true <- data.frame(Predicted = predictions_2, True = test_data$price)
+ggplot(pred_vs_true, aes(x = True, y = Predicted)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "GBM Model: Predicted vs. True Prices",
+       x = "True Prices",
+       y = "Predicted Prices") +
+  theme_minimal()
+```
+
+Gradient boosting produces slightly worse error rates then the random forest
 method. Next we will build a support vector machine model, to do this we will
 normalize the features so they are all using the same scale.
 
@@ -421,7 +447,7 @@ performance <- postResample(predictions, test_data_scaled$price)
 print(performance)
 ```
 
-The SVM performs the best of our models, with RMSE of 108 vs the next best performing model, the random forest of 115. 
+The SVM performs worse then the random forest and the GBM methods. However it is worth noting it is a faster training model for not much worse performance.
 
 ```{r}
 library(ggplot2)
@@ -438,3 +464,5 @@ ggplot(pred_vs_true, aes(x = True, y = Predicted)) +
 
 SVM shows a 20% improvement in Mean absolute error over our baseline linear
 regression, and a 7% improvement in Root mean square error.
+
+However our best performing model overall is the random forest, performing 12% better in RMSE and roughly 20% better in MAE.
