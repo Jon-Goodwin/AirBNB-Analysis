@@ -47,7 +47,7 @@ to get started:
 
 ```{r}
 # Check Summary Statistics
-summary(data)
+head(data)
 ```
 Some initial things to note from the summary statistics is that the vast majority of listings(67.7%) are entire homes or apartments as opposed to shared living spaces. Private rooms make up the bulk of the remainder at 31.5%.
 
